@@ -27,11 +27,9 @@ const HOSPITAL_COLORS = {
   critical:  "#ff2020",
 };
 
-// CartoDB Dark Matter — free, no API key needed
-const DARK_TILE_URL =
-  "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png";
+const TILE_URL = "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png";
 const TILE_ATTRIBUTION =
-  '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/">CARTO</a>';
+  '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors';
 
 function divIcon(html, size = [36, 36]) {
   return L.divIcon({
@@ -43,17 +41,16 @@ function divIcon(html, size = [36, 36]) {
   });
 }
 
-function ambulanceIcon(dispatched, heading) {
-  const shadow = dispatched
-    ? "0 0 18px rgba(255,32,32,0.9)"
-    : "0 0 14px rgba(0,136,255,0.7)";
-  const border = dispatched ? "#ff2020" : "#0088ff";
-  const bg     = dispatched ? "rgba(255,32,32,0.15)" : "rgba(0,136,255,0.15)";
-  const anim   = dispatched ? "ambulance-emergency" : "ambulance-pulse";
+function ambulanceIcon(dispatched, heading, isAssigned = false) {
+  const border = isAssigned ? "#1d4ed8" : dispatched ? "#dc2626" : "#2563eb";
+  const bg = isAssigned ? "#dbeafe" : dispatched ? "#fee2e2" : "#dbeafe";
+  const ring = isAssigned
+    ? "0 0 0 4px rgba(37,99,235,0.18),0 2px 10px rgba(0,0,0,0.25)"
+    : "0 2px 8px rgba(0,0,0,0.2)";
   return divIcon(
     `<div style="width:34px;height:34px;border-radius:50%;background:${bg};border:2px solid ${border};
-      display:flex;align-items:center;justify-content:center;box-shadow:${shadow};
-      animation:${anim} ${dispatched ? "0.8s" : "1.5s"} ease-in-out infinite;
+      display:flex;align-items:center;justify-content:center;
+      box-shadow:${ring};
       transform:rotate(${heading || 0}deg);font-size:17px;">🚑</div>`,
     [34, 34]
   );
@@ -61,37 +58,35 @@ function ambulanceIcon(dispatched, heading) {
 
 function hospitalIcon(color) {
   return divIcon(
-    `<div style="width:32px;height:32px;border-radius:6px;background:${color}22;border:2px solid ${color};
-      display:flex;align-items:center;justify-content:center;box-shadow:0 0 12px ${color}88;font-size:16px;">🏥</div>`,
+    `<div style="width:32px;height:32px;border-radius:8px;background:#ffffff;border:2px solid ${color};
+      display:flex;align-items:center;justify-content:center;box-shadow:0 2px 8px rgba(0,0,0,0.15);font-size:16px;">🏥</div>`,
     [32, 32]
   );
 }
 
 function patientIcon() {
   return divIcon(
-    `<div style="width:22px;height:22px;border-radius:50%;background:rgba(255,170,0,0.2);
-      border:2px solid #ffaa00;box-shadow:0 0 18px rgba(255,170,0,0.9);
-      animation:patient-pulse 0.8s ease-in-out infinite;"></div>`,
+    `<div style="width:22px;height:22px;border-radius:50%;background:#fef3c7;
+      border:2px solid #d97706;box-shadow:0 2px 8px rgba(0,0,0,0.2);"></div>`,
     [22, 22]
   );
 }
 
 function ambulancePopup(amb) {
-  return `<div style="font-family:Rajdhani,sans-serif;padding:8px;">
-    <div style="color:#0088ff;font-weight:700;font-size:14px">${amb.id}</div>
-    <div style="color:#00ff88;font-size:12px">${amb.type} Unit</div>
-    <div style="color:#aaa;font-size:11px">${amb.crew.join(" · ")}</div>
+  return `<div style="font-family:Inter,system-ui,sans-serif;padding:8px;min-width:150px;">
+    <div style="color:#1e293b;font-weight:700;font-size:13px">Ambulance ${amb.id}</div>
+    <div style="color:#334155;font-size:12px">${amb.type} Unit</div>
   </div>`;
 }
 
 function hospitalPopup(h, color) {
-  return `<div style="font-family:Rajdhani,sans-serif;padding:8px;min-width:160px;">
+  return `<div style="font-family:Inter,system-ui,sans-serif;padding:8px;min-width:160px;">
     <div style="color:${color};font-weight:700;font-size:13px">${h.name}</div>
-    <div style="color:#aaa;font-size:11px;margin-top:4px">${h.level}</div>
-    <div style="color:#e0eeff;font-size:12px;margin-top:4px">
+    <div style="color:#64748b;font-size:11px;margin-top:4px">${h.level}</div>
+    <div style="color:#334155;font-size:12px;margin-top:4px">
       Beds: <span style="color:${color}">${h.available}</span> / ${h.capacity}
     </div>
-    <div style="color:#aaa;font-size:11px">${h.specialties.join(", ")}</div>
+    <div style="color:#64748b;font-size:11px">${h.specialties.join(", ")}</div>
   </div>`;
 }
 
@@ -104,21 +99,21 @@ export default function MapView() {
   const routeLayersRef = useRef([]);
   const { state }    = useEmergency();
   const [mapReady, setMapReady] = useState(false);
+  const center = state.mapCenter || { lat: 40.7128, lng: -74.006 };
 
   // 1 — Init map
   useEffect(() => {
     if (!mapContainer.current || mapRef.current) return;
 
     const map = L.map(mapContainer.current, {
-      center: [40.7128, -74.006],
+      center: [center.lat, center.lng],
       zoom: 12,
       zoomControl: false,
       attributionControl: false,
     });
 
-    L.tileLayer(DARK_TILE_URL, {
+    L.tileLayer(TILE_URL, {
       attribution: TILE_ATTRIBUTION,
-      subdomains: "abcd",
       maxZoom: 19,
     }).addTo(map);
 
@@ -134,22 +129,36 @@ export default function MapView() {
     return () => { map.remove(); mapRef.current = null; };
   }, []);
 
+  // Keep map aligned when backend center changes (for user location updates).
+  useEffect(() => {
+    if (!mapReady || state.activeEmergency) return;
+    mapRef.current.flyTo([center.lat, center.lng], mapRef.current.getZoom(), { duration: 1.1 });
+  }, [mapReady, center.lat, center.lng, state.activeEmergency]);
+
   // 2 — Ambulance markers
   useEffect(() => {
     if (!mapReady) return;
     const map = mapRef.current;
     state.ambulances.forEach((amb) => {
       const latlng = [amb.coordinates[1], amb.coordinates[0]];
-      const icon   = ambulanceIcon(amb.status === "dispatched", amb.heading);
+      const isAssigned = state.activeEmergency?.ambulanceId === amb.id;
+      const icon = ambulanceIcon(amb.status === "dispatched", amb.heading, isAssigned);
       if (!markersRef.current[amb.id]) {
-        markersRef.current[amb.id] = L.marker(latlng, { icon, zIndexOffset: 500 })
+        markersRef.current[amb.id] = L.marker(latlng, { icon, zIndexOffset: isAssigned ? 1700 : 500 })
           .addTo(map)
           .bindPopup(ambulancePopup(amb), { className: "eers-popup" });
       } else {
-        markersRef.current[amb.id].setLatLng(latlng).setIcon(icon);
+        markersRef.current[amb.id]
+          .setLatLng(latlng)
+          .setIcon(icon)
+          .setZIndexOffset(isAssigned ? 1700 : 500);
+      }
+
+      if (isAssigned && markersRef.current[amb.id]) {
+        markersRef.current[amb.id].openPopup();
       }
     });
-  }, [mapReady, state.ambulances]);
+  }, [mapReady, state.ambulances, state.activeEmergency]);
 
   // 3 — Hospital markers
   useEffect(() => {
@@ -181,7 +190,7 @@ export default function MapView() {
     if (patientRef.current) { map.removeLayer(patientRef.current); patientRef.current = null; }
 
     if (!state.activeEmergency) return;
-    const { routes, patientCoords } = state.activeEmergency;
+    const { routes, patientCoords, ambulanceId } = state.activeEmergency;
     if (!routes) return;
 
     const trafficColor = TRAFFIC_COLORS[state.trafficCondition] || "#0088ff";
@@ -209,8 +218,21 @@ export default function MapView() {
       }).addTo(map)
         .bindPopup(`<div style="font-family:Rajdhani,sans-serif;padding:6px;color:#ffaa00;font-weight:700">🔴 Patient Location</div>`,
           { className: "eers-popup" });
+    }
 
-      map.flyTo([patientCoords[1], patientCoords[0]], 13, { duration: 2 });
+    // Keep ambulance and full path visible to avoid confusion where assigned ambulance is.
+    if (routes.full?.length > 1) {
+      const fullCoords = routes.full.map(([lng, lat]) => [lat, lng]);
+      const bounds = L.latLngBounds(fullCoords);
+      map.fitBounds(bounds, { padding: [40, 40], maxZoom: 14, animate: true, duration: 1.0 });
+    } else if (patientCoords) {
+      map.flyTo([patientCoords[1], patientCoords[0]], 13, { duration: 1.2 });
+    }
+
+    // Visually prioritize assigned ambulance marker.
+    if (ambulanceId && markersRef.current[ambulanceId]) {
+      markersRef.current[ambulanceId].setZIndexOffset(1500);
+      markersRef.current[ambulanceId].openPopup();
     }
   }, [mapReady, state.activeEmergency]);
 
@@ -224,29 +246,12 @@ export default function MapView() {
   }, [mapReady, state.trafficCondition]);
 
   return (
-    <div className="relative w-full h-full">
+    <div className="relative w-full h-full bg-slate-100">
       <div ref={mapContainer} className="w-full h-full" />
 
-      {/* Edge fades */}
-      <div className="absolute top-0 left-0 right-0 h-16 pointer-events-none"
-        style={{ background: "linear-gradient(to bottom, rgba(3,7,18,0.55), transparent)" }} />
-      <div className="absolute bottom-0 left-0 right-0 h-16 pointer-events-none"
-        style={{ background: "linear-gradient(to top, rgba(3,7,18,0.55), transparent)" }} />
-
       {/* Coord badge */}
-      <div className="absolute bottom-4 right-4 glass-card px-3 py-1.5 rounded text-xs font-mono text-blue-400/60 pointer-events-none" style={{zIndex:999}}>
-        40.7128°N 74.0060°W · NYC
-      </div>
-
-      {/* Traffic legend */}
-      <div className="absolute top-4 right-4 glass-card px-3 py-2 rounded-lg text-xs" style={{zIndex:999}}>
-        <div className="text-gray-500 font-display text-xs mb-1.5 tracking-wider">TRAFFIC</div>
-        {["light","moderate","heavy","severe"].map((t) => (
-          <div key={t} className="flex items-center gap-2 mb-0.5">
-            <div className="w-3 h-1 rounded" style={{ background: TRAFFIC_COLORS[t] }} />
-            <span className="text-gray-400 capitalize font-mono text-xs">{t}</span>
-          </div>
-        ))}
+      <div className="absolute bottom-4 right-4 px-3 py-1.5 rounded-md text-xs bg-white/90 border border-slate-200 text-slate-600 pointer-events-none" style={{zIndex:999}}>
+        {`${Math.abs(center.lat).toFixed(4)}°${center.lat >= 0 ? "N" : "S"} ${Math.abs(center.lng).toFixed(4)}°${center.lng >= 0 ? "E" : "W"}`}
       </div>
     </div>
   );

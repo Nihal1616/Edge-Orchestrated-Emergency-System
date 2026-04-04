@@ -19,6 +19,8 @@ function InfoRow({ label, value, color }) {
   );
 }
 
+const SUPPORTED_CITIES = ["Hyderabad", "Kurnool", "Bangalore", "Nandyal"];
+
 function GlassPanel({ children, className = "", emergency = false }) {
   return (
     <div className={`rounded-lg p-4 relative ${emergency ? "glass-card-emergency" : "glass-card"} ${className}`}>
@@ -27,9 +29,9 @@ function GlassPanel({ children, className = "", emergency = false }) {
   );
 }
 
-export default function LeftPanel({ onTriggerEmergency }) {
+export default function LeftPanel({ onTriggerEmergency, onSwitchCity }) {
   const { state } = useEmergency();
-  const { activeEmergency, ambulances, hospitals, isTriggeringEmergency, isConnected } = state;
+  const { activeEmergency, ambulances, hospitals, isTriggeringEmergency, isConnected, cityName, hospitalSource } = state;
 
   const availableAmbs = ambulances.filter((a) => a.status === "available").length;
   const assignedAmb = activeEmergency
@@ -97,6 +99,25 @@ export default function LeftPanel({ onTriggerEmergency }) {
         <div className="text-xs font-display tracking-widest text-blue-400/50 uppercase mb-3">
           System Status
         </div>
+        <div className="mb-3 p-2 rounded-md bg-blue-950/20 border border-blue-900/20">
+          <div className="text-[11px] text-gray-500 font-mono">City</div>
+          <div className="text-sm text-blue-300 font-semibold">{cityName || "My Location"}</div>
+          <div className="text-[11px] text-gray-600 font-mono">Hospitals: {hospitalSource === "osm" ? "Real-time OSM" : "Fallback"}</div>
+        </div>
+
+        <div className="mb-3 grid grid-cols-2 gap-2">
+          {SUPPORTED_CITIES.map((city) => (
+            <button
+              key={city}
+              type="button"
+              onClick={() => onSwitchCity?.(city)}
+              className="text-xs py-1.5 rounded border border-blue-900/40 bg-blue-950/20 hover:border-blue-500/50 text-blue-300"
+            >
+              {city}
+            </button>
+          ))}
+        </div>
+
         <div className="grid grid-cols-3 gap-2">
           {[
             { label: "AMBS", value: availableAmbs, total: ambulances.length, color: "#0088ff" },
@@ -143,7 +164,7 @@ export default function LeftPanel({ onTriggerEmergency }) {
                 <InfoRow
                   label="Location"
                   value={activeEmergency.patientCoords
-                    ? `${activeEmergency.patientCoords[1]?.toFixed(4)}°N, ${Math.abs(activeEmergency.patientCoords[0])?.toFixed(4)}°W`
+                    ? `${Math.abs(activeEmergency.patientCoords[1])?.toFixed(4)}°${activeEmergency.patientCoords[1] >= 0 ? "N" : "S"}, ${Math.abs(activeEmergency.patientCoords[0])?.toFixed(4)}°${activeEmergency.patientCoords[0] >= 0 ? "E" : "W"}`
                     : "Unknown"
                   }
                 />

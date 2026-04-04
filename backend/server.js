@@ -3,7 +3,7 @@ const http = require("http");
 const { Server } = require("socket.io");
 const cors = require("cors");
 
-const { hospitals, ambulances } = require("./utils/mockData");
+const { createSimulationData, DEFAULT_CITY_CENTER, DEFAULT_CITY_NAME } = require("./utils/mockData");
 const EmergencyService = require("./services/emergencyService");
 const apiRoutes = require("./routes/api");
 
@@ -20,8 +20,11 @@ const io = new Server(server, {
 app.use(cors());
 app.use(express.json());
 
+const { mapCenter, hospitals, ambulances } = createSimulationData(DEFAULT_CITY_CENTER);
+
 // Initialize Emergency Service
-const emergencyService = new EmergencyService(io, ambulances, hospitals);
+const emergencyService = new EmergencyService(io, ambulances, hospitals, mapCenter);
+emergencyService.cityName = DEFAULT_CITY_NAME;
 
 // Routes
 app.use("/api", apiRoutes(emergencyService));

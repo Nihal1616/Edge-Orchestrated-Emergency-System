@@ -56,14 +56,14 @@ export default function RightPanel() {
           Response
         </h2>
         <h3 className="font-display text-base font-bold text-neon-blue leading-tight">
-          Analytics
+          Overview
         </h3>
       </div>
 
       {/* ETA Panel */}
       <div className={`glass-card rounded-lg p-4 ${activeEmergency ? "glass-card-emergency" : ""}`}>
         <div className="text-xs font-display tracking-widest text-blue-400/50 uppercase mb-4">
-          Estimated Time of Arrival
+          ETA
         </div>
 
         <AnimatePresence mode="wait">
@@ -79,7 +79,7 @@ export default function RightPanel() {
                 <ProgressBar
                   value={etaProgress}
                   color={routePhase === "toPatient" ? "#ffaa00" : "#0088ff"}
-                  label="Mission Progress"
+                  label="Progress"
                 />
               </div>
             </motion.div>
@@ -93,21 +93,21 @@ export default function RightPanel() {
               <div className="font-display text-4xl font-black text-blue-900/50 leading-none">
                 --:--
               </div>
-              <div className="text-xs font-mono text-gray-700 tracking-widest mt-1">STANDBY</div>
+              <div className="text-xs font-mono text-gray-700 tracking-widest mt-1">IDLE</div>
             </motion.div>
           )}
         </AnimatePresence>
       </div>
 
-      {/* Route Distance */}
+      {/* Mission Summary */}
       <div className="glass-card rounded-lg p-4">
         <div className="text-xs font-display tracking-widest text-blue-400/50 uppercase mb-3">
-          Route Telemetry
+          Mission
         </div>
 
         <div className="space-y-3">
           <div className="flex justify-between items-center">
-            <span className="text-xs font-mono text-gray-500">TOTAL DIST</span>
+            <span className="text-xs font-mono text-gray-500">Distance</span>
             <span className="font-display text-sm font-bold text-blue-300">
               {activeEmergency?.totalDistance
                 ? `${activeEmergency.totalDistance.toFixed(2)} km`
@@ -116,7 +116,7 @@ export default function RightPanel() {
           </div>
 
           <div className="flex justify-between items-center">
-            <span className="text-xs font-mono text-gray-500">REMAINING</span>
+            <span className="text-xs font-mono text-gray-500">Remaining</span>
             <motion.span
               className="font-display text-sm font-bold text-yellow-400"
               key={remainingDistance}
@@ -128,7 +128,7 @@ export default function RightPanel() {
           </div>
 
           <div className="flex justify-between items-center">
-            <span className="text-xs font-mono text-gray-500">PHASE</span>
+            <span className="text-xs font-mono text-gray-500">Phase</span>
             <span className={`text-xs font-display font-bold px-2 py-0.5 rounded ${
               routePhase === "toPatient"
                 ? "bg-yellow-900/30 text-yellow-400 border border-yellow-800/30"
@@ -136,9 +136,9 @@ export default function RightPanel() {
                 ? "bg-blue-900/30 text-blue-400 border border-blue-800/30"
                 : "bg-gray-900/30 text-gray-500 border border-gray-800/30"
             }`}>
-              {routePhase === "toPatient" ? "→ PATIENT"
-                : routePhase === "toHospital" ? "→ HOSPITAL"
-                : "STANDBY"}
+              {routePhase === "toPatient" ? "To Patient"
+                : routePhase === "toHospital" ? "To Hospital"
+                : "Idle"}
             </span>
           </div>
         </div>
@@ -147,7 +147,7 @@ export default function RightPanel() {
       {/* Traffic Condition */}
       <div className={`glass-card rounded-lg p-4 border ${traffic.bg}`}>
         <div className="text-xs font-display tracking-widest text-blue-400/50 uppercase mb-3">
-          Traffic Condition
+          Traffic
         </div>
 
         <div className="flex items-center justify-between">
@@ -157,7 +157,7 @@ export default function RightPanel() {
               <div className="font-display text-base font-bold" style={{ color: traffic.color }}>
                 {traffic.label}
               </div>
-              <div className="text-xs font-mono text-gray-500">Real-time feed</div>
+              <div className="text-xs font-mono text-gray-500">Live</div>
             </div>
           </div>
           <div className="w-12 h-12 relative flex items-center justify-center">
@@ -187,42 +187,6 @@ export default function RightPanel() {
                 boxShadow: t === trafficCondition ? `0 0 6px ${TRAFFIC_CONFIG[t].color}` : "none",
               }}
             />
-          ))}
-        </div>
-      </div>
-
-      {/* Ambulance Fleet */}
-      <div className="glass-card rounded-lg p-4">
-        <div className="text-xs font-display tracking-widest text-blue-400/50 uppercase mb-3">
-          Fleet Status
-        </div>
-        <div className="space-y-1.5">
-          {state.ambulances.slice(0, 5).map((amb) => (
-            <div key={amb.id} className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <div
-                  className="w-1.5 h-1.5 rounded-full"
-                  style={{
-                    background: amb.status === "available" ? "#00cc6a" : "#ff2020",
-                    boxShadow: `0 0 4px ${amb.status === "available" ? "#00cc6a" : "#ff2020"}`,
-                  }}
-                />
-                <span className="text-xs font-mono text-gray-400">{amb.id}</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="text-xs font-mono text-gray-600">{amb.type}</span>
-                <span
-                  className="text-xs px-1.5 py-0.5 rounded font-mono"
-                  style={{
-                    color: amb.status === "available" ? "#00cc6a" : "#ff4444",
-                    background: amb.status === "available" ? "rgba(0,204,106,0.1)" : "rgba(255,32,32,0.1)",
-                    border: `1px solid ${amb.status === "available" ? "rgba(0,204,106,0.3)" : "rgba(255,32,32,0.3)"}`,
-                  }}
-                >
-                  {amb.status.toUpperCase()}
-                </span>
-              </div>
-            </div>
           ))}
         </div>
       </div>

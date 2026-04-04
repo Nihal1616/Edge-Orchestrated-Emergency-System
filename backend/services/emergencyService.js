@@ -3,25 +3,104 @@ const {
   findNearestAmbulance,
   findBestHospital,
   generateFullRoute,
-  interpolatePosition,
   generateTrafficData,
   calculateETA,
   haversineDistance,
 } = require("../utils/routeUtils");
 
+const ML_SERVICE_URL = process.env.ML_SERVICE_URL || "http://127.0.0.1:8000";
+
+function clampTrafficLevel(level) {
+  const val = Number(level);
+  if (!Number.isFinite(val)) return 3;
+  return Math.max(1, Math.min(5, Math.round(val)));
+}
+
+function conditionToTrafficLevel(condition) {
+  const map = { light: 1, moderate: 3, heavy: 4, severe: 5 };
+  return map[condition] || 3;
+}
+
+function trafficLevelToCondition(level) {
+  if (level <= 1) return "light";
+  if (level <= 3) return "moderate";
+  if (level === 4) return "heavy";
+  return "severe";
+}
+
 class EmergencyService {
-  constructor(io, ambulances, hospitals) {
+  constructor(io, ambulances, hospitals, mapCenter = { lng: -74.006, lat: 40.7128 }) {
     this.io = io;
     this.ambulances = ambulances;
     this.hospitals = hospitals;
+    this.mapCenter = mapCenter;
+    this.cityName = "Hyderabad";
+    this.hospitalSource = "template";
     this.activeEmergencies = new Map();
     this.ambulanceIntervals = new Map();
     this.trafficInterval = null;
     this.currentTraffic = "moderate";
     this.logs = [];
+    this.mlAvailable = true;
 
     this.startAmbulanceMovement();
     this.startTrafficVariation();
+  }
+
+  async postToML(path, payload) {
+    const res = await fetch(`${ML_SERVICE_URL}${path}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+
+    if (!res.ok) {
+      throw new Error(`ML ${path} failed: ${res.status}`);
+    }
+
+    return res.json();
+  }
+
+  async predictTrafficCondition(distanceKm = 5) {
+    try {
+      const data = await this.postToML("/get-traffic-prediction", {
+        distance: Number(distanceKm.toFixed(2)),
+      });
+
+      if (data && data.status === "success") {
+        this.mlAvailable = true;
+        const level = clampTrafficLevel(data.traffic_level);
+        return trafficLevelToCondition(level);
+      }
+    } catch (e) {
+      this.mlAvailable = false;
+    }
+
+    return generateTrafficData();
+  }
+
+  async predictEmergencyETA(ambulanceCoords, patientCoords, hospitalCoords, trafficCondition) {
+    try {
+      const trafficLevel = conditionToTrafficLevel(trafficCondition);
+      const data = await this.postToML("/quick-emergency-response", {
+        ambulance_lat: ambulanceCoords[1],
+        ambulance_lon: ambulanceCoords[0],
+        patient_lat: patientCoords[1],
+        patient_lon: patientCoords[0],
+        hospital_lat: hospitalCoords[1],
+        hospital_lon: hospitalCoords[0],
+        traffic_level: trafficLevel,
+      });
+
+      if (data && data.status === "success" && Number.isFinite(Number(data.total_eta_minutes))) {
+        this.mlAvailable = true;
+        return Math.max(1, Math.round(Number(data.total_eta_minutes)));
+      }
+    } catch (e) {
+      this.mlAvailable = false;
+    }
+
+    return null;
   }
 
   addLog(message, type = "info") {
@@ -59,9 +138,9 @@ class EmergencyService {
   }
 
   startTrafficVariation() {
-    this.trafficInterval = setInterval(() => {
+    this.trafficInterval = setInterval(async () => {
       const prev = this.currentTraffic;
-      this.currentTraffic = generateTrafficData();
+      this.currentTraffic = await this.predictTrafficCondition(6);
 
       if (prev !== this.currentTraffic) {
         this.addLog(
@@ -97,13 +176,37 @@ class EmergencyService {
     }, 12000);
   }
 
-  triggerEmergency(severity = "critical", location = null) {
+  recenterSimulation({ mapCenter, ambulances, hospitals, cityName = "My Location", hospitalSource = "template" }) {
+    // Reset active emergency movement loops before applying new coordinates.
+    this.ambulanceIntervals.forEach((intervalId) => clearInterval(intervalId));
+    this.ambulanceIntervals.clear();
+    this.activeEmergencies.clear();
+
+    this.mapCenter = mapCenter;
+    this.ambulances = ambulances;
+    this.hospitals = hospitals;
+    this.cityName = cityName;
+    this.hospitalSource = hospitalSource;
+
+    this.addLog(
+      `Simulation centered at ${cityName} (${mapCenter.lat.toFixed(4)}, ${mapCenter.lng.toFixed(4)})`,
+      "info"
+    );
+
+    this.io.emit("initialState", this.getState());
+  }
+
+  hasActiveEmergency() {
+    return this.activeEmergencies.size > 0;
+  }
+
+  async triggerEmergency(severity = "critical", location = null) {
     const emergencyId = uuidv4();
 
     // Generate random patient location near city center
     const patientCoords = location || [
-      -74.006 + (Math.random() - 0.5) * 0.08,
-      40.7128 + (Math.random() - 0.5) * 0.08,
+      this.mapCenter.lng + (Math.random() - 0.5) * 0.08,
+      this.mapCenter.lat + (Math.random() - 0.5) * 0.08,
     ];
 
     // Find nearest available ambulance
@@ -126,17 +229,40 @@ class EmergencyService {
     }
 
     // Generate route
-    const routes = generateFullRoute(
+    const routes = await generateFullRoute(
       ambulance.coordinates,
       patientCoords,
       hospital.coordinates
     );
 
+    // Keep entities aligned with snapped drivable points.
+    if (routes?.snapped?.ambulance) {
+      ambulance.coordinates = [routes.snapped.ambulance[0], routes.snapped.ambulance[1]];
+    }
+
+    if (routes?.snapped?.patient) {
+      patientCoords[0] = routes.snapped.patient[0];
+      patientCoords[1] = routes.snapped.patient[1];
+    }
+
+    if (routes?.snapped?.hospital) {
+      hospital.coordinates = [routes.snapped.hospital[0], routes.snapped.hospital[1]];
+    }
+
     // Calculate initial ETA
     const totalDistance =
-      haversineDistance(ambulance.coordinates, patientCoords) +
-      haversineDistance(patientCoords, hospital.coordinates);
-    const eta = calculateETA(totalDistance, this.currentTraffic);
+      haversineDistance(routes.toPatient[0], routes.toPatient[routes.toPatient.length - 1]) +
+      haversineDistance(routes.toHospital[0], routes.toHospital[routes.toHospital.length - 1]);
+    let eta = await this.predictEmergencyETA(
+      ambulance.coordinates,
+      patientCoords,
+      hospital.coordinates,
+      this.currentTraffic
+    );
+
+    if (!eta) {
+      eta = calculateETA(totalDistance, this.currentTraffic);
+    }
 
     // Mark ambulance as dispatched
     ambulance.status = "dispatched";
@@ -174,6 +300,7 @@ class EmergencyService {
 
     return {
       emergencyId,
+      severity,
       ambulance,
       hospital,
       patientCoords,
@@ -226,6 +353,7 @@ class EmergencyService {
       // Update remaining distance and ETA
       const remainingPoints = totalPoints - currentIndex;
       emergency.remainingDistance = emergency.totalDistance * (remainingPoints / totalPoints);
+      // Keep per-tick updates deterministic and non-blocking.
       const newETA = calculateETA(emergency.remainingDistance, this.currentTraffic);
       emergency.eta = newETA;
 
@@ -254,10 +382,14 @@ class EmergencyService {
 
   getState() {
     return {
+      mapCenter: this.mapCenter,
+      cityName: this.cityName,
+      hospitalSource: this.hospitalSource,
       ambulances: this.ambulances,
       hospitals: this.hospitals,
       activeEmergencies: Array.from(this.activeEmergencies.values()),
       trafficCondition: this.currentTraffic,
+      mlAvailable: this.mlAvailable,
       logs: this.logs.slice(0, 20),
     };
   }

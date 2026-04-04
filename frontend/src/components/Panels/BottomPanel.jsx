@@ -24,7 +24,7 @@ function formatTime(iso) {
 
 export default function BottomPanel() {
   const { state } = useEmergency();
-  const { logs } = state;
+  const logs = state.logs.slice(0, 8);
 
   return (
     <div className="flex flex-col h-full">
@@ -32,7 +32,7 @@ export default function BottomPanel() {
         <div className="flex items-center gap-2">
           <div className="w-2 h-2 rounded-full bg-green-400 animate-pulse" />
           <span className="font-display text-xs tracking-widest text-blue-400/60 uppercase">
-            System Event Log
+            Activity
           </span>
         </div>
         <span className="text-xs font-mono text-gray-600">{logs.length} events</span>
@@ -56,9 +56,9 @@ export default function BottomPanel() {
                   transition={{ duration: 0.3 }}
                   className="flex items-start gap-2 py-0.5 px-2 rounded hover:bg-blue-950/20 transition-colors"
                 >
-                  <span className="text-xs mt-0.5 flex-shrink-0">{config.icon}</span>
+                  <span className="text-xs mt-0.5 flex-shrink-0 opacity-80">{config.icon}</span>
                   <div className="flex-1 min-w-0">
-                    <span className="text-xs font-body" style={{ color: config.color }}>
+                    <span className="text-xs font-body text-gray-300" style={{ color: config.color }}>
                       {log.message}
                     </span>
                   </div>

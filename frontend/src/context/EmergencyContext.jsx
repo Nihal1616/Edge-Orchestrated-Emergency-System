@@ -3,6 +3,9 @@ import { createContext, useContext, useReducer, useCallback } from "react";
 const EmergencyContext = createContext(null);
 
 const initialState = {
+  mapCenter: { lat: 40.7128, lng: -74.006 },
+  cityName: "My Location",
+  hospitalSource: "template",
   ambulances: [],
   hospitals: [],
   activeEmergency: null,
@@ -25,6 +28,9 @@ function emergencyReducer(state, action) {
     case "SET_INITIAL_STATE":
       return {
         ...state,
+        mapCenter: action.payload.mapCenter || state.mapCenter,
+        cityName: action.payload.cityName || state.cityName,
+        hospitalSource: action.payload.hospitalSource || state.hospitalSource,
         ambulances: action.payload.ambulances,
         hospitals: action.payload.hospitals,
         trafficCondition: action.payload.trafficCondition,

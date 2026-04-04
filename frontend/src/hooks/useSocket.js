@@ -18,7 +18,7 @@ export function useSocket() {
 
   useEffect(() => {
     const socket = io(SOCKET_URL, {
-      transports: ["websocket", "polling"],
+      transports: ["polling", "websocket"],
       reconnection: true,
       reconnectionDelay: 1000,
     });
@@ -33,6 +33,10 @@ export function useSocket() {
     socket.on("disconnect", () => {
       setConnected(false);
       console.log("❌ Disconnected from EERS backend");
+    });
+
+    socket.on("connect_error", (err) => {
+      console.warn("Socket reconnecting:", err.message);
     });
 
     socket.on("initialState", (data) => {

@@ -1,52 +1,36 @@
-# 🚑 Edge-Orchestrated Emergency Response System (EERS)
+# Edge-Orchestrated Emergency Response System
 
-A production-level, real-time emergency dispatch simulation with live maps, WebSocket updates, and a dark cyber-style UI.
+Realtime emergency dispatch simulation with a simplified frontend, Socket.IO live updates, city/location switching, road-based routing, and optional FastAPI ML assistance.
 
-**Maps**: Leaflet + OpenStreetMap (CartoDB Dark Matter tiles) — **no API key required.**
+## Project Structure
 
----
-
-## 🗂 Project Structure
-
-```
-edge-emergency/
-├── backend/               # Node.js + Express + Socket.IO
+```text
+Edge-Orchestrated-Emergency-System/
+├── backend/                     # Express + Socket.IO orchestrator
 │   ├── server.js
 │   ├── routes/api.js
 │   ├── services/emergencyService.js
 │   └── utils/
-│       ├── mockData.js
-│       └── routeUtils.js
-│
-└── frontend/              # React + Vite + Tailwind + Leaflet
-    ├── index.html
-    ├── vite.config.js
-    └── src/
-        ├── App.jsx
-        ├── main.jsx
-        ├── index.css
-        ├── context/EmergencyContext.jsx
-        ├── hooks/useSocket.js
-        ├── utils/sounds.js
-        └── components/
-            ├── Map/MapView.jsx        ← Leaflet + OSM
-            └── Panels/
-                ├── LeftPanel.jsx
-                ├── RightPanel.jsx
-                └── BottomPanel.jsx
+├── frontend/                    # React + Vite + Leaflet UI
+│   ├── src/
+│   └── index.html
+└── model/                       # Optional FastAPI ML service
+    ├── app.py
+    ├── train_model.py
+    ├── quick_train.py
+    ├── traffic_model.pkl
+    └── requirements.txt
 ```
 
----
+## Prerequisites
 
-## ⚙️ Prerequisites
+- Node.js 18+
+- npm 9+
+- Python 3.10+ (only if using `model/` service)
 
-- Node.js v18+
-- npm v9+
-- No map API key needed — uses free OpenStreetMap tiles
+## Run The App
 
----
-
-## 🚀 Step 1 — Start the Backend
+1. Start backend:
 
 ```bash
 cd backend
@@ -54,13 +38,9 @@ npm install
 npm run dev
 ```
 
-Backend runs on **http://localhost:3001**
+Backend URL: http://localhost:3001
 
----
-
-## 🖥 Step 2 — Start the Frontend
-
-In a new terminal:
+2. Start frontend in a new terminal:
 
 ```bash
 cd frontend
@@ -68,55 +48,37 @@ npm install
 npm run dev
 ```
 
-Frontend runs on **http://localhost:5173**
+Frontend URL: http://localhost:5173
 
----
+3. Optional: start FastAPI ML service in a third terminal:
 
-## 🎮 Usage
+```bash
+cd model
+pip install -r requirements.txt
+python app.py
+```
 
-1. Open **http://localhost:5173**
-2. Watch ambulances drift on the live dark map
-3. Click **⚡ TRIGGER EMERGENCY** in the left panel
-4. The system will:
-   - Play a siren alert sound
-   - Locate a simulated patient
-   - Dispatch the nearest ambulance
-   - Calculate the optimal hospital
-   - Draw live routes on the map
-   - Show real-time ETA countdown
-   - Log all events in the bottom panel
-5. Traffic changes every ~12 seconds → triggers automatic rerouting
+ML service URL: http://localhost:8000
 
----
+## Core Features
 
-## 🌐 API Endpoints
+- Realtime ambulance movement and ETA updates
+- City switch API with dynamic map recentering
+- Road-following route generation with fallback handling
+- OSM hospital discovery for supported regions
+- Simplified UI with emergency-first controls
 
-| Method | Endpoint        | Description                        |
-|--------|-----------------|------------------------------------|
-| POST   | /api/emergency  | Trigger a new emergency            |
-| GET    | /api/hospitals  | List all hospitals + availability  |
-| GET    | /api/ambulances | List all ambulance units           |
-| GET    | /api/state      | Full system state snapshot         |
-| GET    | /health         | Health check                       |
+## Main API Endpoints
 
-## 🔌 WebSocket Events
+- `GET /health` - backend health check
+- `POST /api/emergency` - trigger emergency workflow
+- `GET /api/state` - current system snapshot
+- `GET /api/ambulances` - ambulance fleet
+- `GET /api/hospitals` - hospitals currently loaded
+- `POST /api/location` - recenter simulation to coordinates
+- `POST /api/city` - switch simulation city
 
-| Event             | Direction       | Description                      |
-|-------------------|-----------------|----------------------------------|
-| initialState      | Server → Client | Full state on connect            |
-| ambulanceMove     | Server → Client | Ambulance position update        |
-| etaUpdate         | Server → Client | ETA + progress update            |
-| routeUpdate       | Server → Client | Reroute notification             |
-| trafficUpdate     | Server → Client | Traffic condition change         |
-| systemLog         | Server → Client | Log entry                        |
-| emergencyComplete | Server → Client | Mission finished                 |
+## Notes
 
----
-
-## 🎨 Tech Stack
-
-- **Frontend**: React 18, Vite, Tailwind CSS, Framer Motion, **Leaflet + OpenStreetMap**
-- **Backend**: Node.js, Express, Socket.IO
-- **State**: React Context API + useReducer
-- **Realtime**: WebSockets via Socket.IO
-- **Map tiles**: CartoDB Dark Matter (free, no key)
+- If port `3001` is already in use, stop the conflicting process before starting backend.
+- `backend/node_modules` and `frontend/node_modules` are intentionally not kept in repo state and should be reinstalled with `npm install` when needed.

@@ -69,10 +69,88 @@ function generateRoute(startCoord, endCoord, waypoints = 8) {
   return route;
 }
 
-function generateFullRoute(ambulanceCoords, patientCoords, hospitalCoords) {
-  const toPatient = generateRoute(ambulanceCoords, patientCoords, 6);
-  const toHospital = generateRoute(patientCoords, hospitalCoords, 10);
-  return { toPatient, toHospital, full: [...toPatient, ...toHospital.slice(1)] };
+function downsampleRoute(coords, maxPoints = 140) {
+  if (!Array.isArray(coords) || coords.length <= maxPoints) return coords;
+
+  const sampled = [];
+  const step = (coords.length - 1) / (maxPoints - 1);
+  for (let i = 0; i < maxPoints; i++) {
+    sampled.push(coords[Math.round(i * step)]);
+  }
+  return sampled;
+}
+
+async function osrmRequest(path) {
+  const endpoints = [
+    "https://router.project-osrm.org",
+  ];
+
+  for (const base of endpoints) {
+    try {
+      const res = await fetch(`${base}${path}`);
+      if (!res.ok) continue;
+      return await res.json();
+    } catch (_) {
+      // Try next endpoint.
+    }
+  }
+
+  return null;
+}
+
+async function snapToRoad(coord) {
+  const [lng, lat] = coord;
+  const data = await osrmRequest(
+    `/nearest/v1/driving/${lng},${lat}?number=1`
+  );
+
+  if (!data || data.code !== "Ok" || !Array.isArray(data.waypoints) || !data.waypoints[0]) {
+    return coord;
+  }
+
+  return data.waypoints[0].location;
+}
+
+async function generateRoadRoute(startCoord, endCoord) {
+  const [sLng, sLat] = startCoord;
+  const [eLng, eLat] = endCoord;
+  const data = await osrmRequest(
+    `/route/v1/driving/${sLng},${sLat};${eLng},${eLat}?overview=full&geometries=geojson&steps=false`
+  );
+
+  if (!data || data.code !== "Ok" || !Array.isArray(data.routes) || !data.routes[0]) {
+    return null;
+  }
+
+  const routeCoords = data.routes[0].geometry?.coordinates;
+  if (!Array.isArray(routeCoords) || routeCoords.length < 2) {
+    return null;
+  }
+
+  return downsampleRoute(routeCoords, 140);
+}
+
+async function generateFullRoute(ambulanceCoords, patientCoords, hospitalCoords) {
+  const snappedAmbulance = await snapToRoad(ambulanceCoords);
+  const snappedPatient = await snapToRoad(patientCoords);
+  const snappedHospital = await snapToRoad(hospitalCoords);
+
+  const toPatientRoad = await generateRoadRoute(snappedAmbulance, snappedPatient);
+  const toHospitalRoad = await generateRoadRoute(snappedPatient, snappedHospital);
+
+  const toPatient = toPatientRoad || generateRoute(snappedAmbulance, snappedPatient, 8);
+  const toHospital = toHospitalRoad || generateRoute(snappedPatient, snappedHospital, 12);
+
+  return {
+    toPatient,
+    toHospital,
+    full: [...toPatient, ...toHospital.slice(1)],
+    snapped: {
+      ambulance: snappedAmbulance,
+      patient: snappedPatient,
+      hospital: snappedHospital,
+    },
+  };
 }
 
 function interpolatePosition(start, end, progress) {
