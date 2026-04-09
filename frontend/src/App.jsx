@@ -9,6 +9,7 @@ import CommandDashboard from "./components/CommandDashboard";
 import PatientTracker from "./components/PatientTracker";
 import PostEmergencyReport from "./components/PostEmergencyReport";
 import DisasterAlert from "./components/DisasterAlert";
+import StoryPanel from "./components/StoryPanel";
 import { playEmergencyAlert } from "./utils/sounds";
 
 function Clock() {
@@ -32,11 +33,18 @@ function Clock() {
 }
 
 function AppInner() {
-  const { state, handleEmergencyTriggered, setTriggering, setDisasterMode } =
-    useEmergency();
+  const {
+    state,
+    handleEmergencyTriggered,
+    setTriggering,
+    setDisasterMode,
+    setLiveMode,
+    setStoryStep,
+  } = useEmergency();
   const { requestState, emitSimControl } = useSocket();
   const [disasterActive, setDisasterActive] = useState(false);
   const [leftOpen, setLeftOpen] = useState(true);
+  const [liveSimulationActive, setLiveSimulationActive] = useState(false);
 
   // Auto-center on user location once
   useEffect(() => {
@@ -67,7 +75,11 @@ function AppInner() {
 
   const triggerEmergency = useCallback(
     async (severity = "critical") => {
+      if (severity && typeof severity === "object" && "target" in severity) {
+        severity = "critical";
+      }
       setTriggering(true);
+      setStoryStep("trigger");
       playEmergencyAlert();
       try {
         const res = await fetch("/api/emergency", {
@@ -78,6 +90,7 @@ function AppInner() {
         const data = await res.json();
         if (data.success) {
           handleEmergencyTriggered(data.data);
+          setStoryStep("ai");
         } else {
           setTriggering(false);
         }
@@ -86,8 +99,22 @@ function AppInner() {
         setTriggering(false);
       }
     },
-    [handleEmergencyTriggered, setTriggering],
+    [handleEmergencyTriggered, setStoryStep, setTriggering],
   );
+
+  useEffect(() => {
+    let interval;
+    if (liveSimulationActive) {
+      setLiveMode(true);
+      interval = setInterval(() => {
+        const severity = Math.random() < 0.5 ? "critical" : "high";
+        triggerEmergency(severity);
+      }, 10000);
+    } else {
+      setLiveMode(false);
+    }
+    return () => clearInterval(interval);
+  }, [liveSimulationActive, setLiveMode, triggerEmergency]);
 
   const triggerDisaster = useCallback(async () => {
     setDisasterActive(true);
@@ -371,7 +398,11 @@ function AppInner() {
               <SimulationControl
                 onTrigger={triggerEmergency}
                 onDisaster={triggerDisaster}
+                liveMode={liveSimulationActive}
+                onLiveModeToggle={() => setLiveSimulationActive((v) => !v)}
+                onTrafficSpike={() => emitSimControl({ type: "trafficSpike" })}
               />
+              <StoryPanel />
               <div
                 style={{ display: "flex", flexDirection: "column", gap: 12 }}
               >
@@ -400,9 +431,9 @@ function AppInner() {
                   📋 ACTIVITY LOG
                 </div>
                 <div style={{ maxHeight: 160, overflowY: "auto" }}>
-                  {state.logs.slice(0, 12).map((log) => (
+                  {state.logs.slice(0, 12).map((log, index) => (
                     <div
-                      key={log.id}
+                      key={`${log.id}-${index}`}
                       style={{
                         fontSize: 10,
                         color: "rgba(255,255,255,0.5)",

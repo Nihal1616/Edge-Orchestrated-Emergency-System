@@ -38,7 +38,7 @@ function findBestHospital(patientCoords, hospitals, ambulanceCoords) {
   let bestScore = Infinity;
 
   for (const hospital of hospitals) {
-    if (hospital.status === "critical" && hospital.available < 2) continue;
+    if (hospital.available < 1) continue;
 
     const distFromPatient = haversineDistance(
       patientCoords,

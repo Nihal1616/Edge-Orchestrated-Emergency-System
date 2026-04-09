@@ -31,6 +31,10 @@ const initialState = {
     totalResolved: 0,
     peakLoad: 0,
   },
+  liveMode: false,
+  storyStep: "waiting",
+  mlDecision: null,
+  systemAlert: null,
 };
 
 function generateAIDecision(emergency, ambulances, hospitals) {
@@ -131,11 +135,12 @@ function emergencyReducer(state, action) {
       const updatedList = exists
         ? state.activeEmergencies
         : [...state.activeEmergencies, newE];
-      const aiDecision = generateAIDecision(
-        newE,
-        state.ambulances,
-        state.hospitals,
-      );
+      const aiDecision = newE.aiDecision
+        ? {
+            ...generateAIDecision(newE, state.ambulances, state.hospitals),
+            ...newE.aiDecision,
+          }
+        : generateAIDecision(newE, state.ambulances, state.hospitals);
       return {
         ...state,
         activeEmergency: newE,
@@ -146,6 +151,7 @@ function emergencyReducer(state, action) {
         routePhase: "toPatient",
         remainingDistance: newE.totalDistance,
         aiDecision,
+        storyStep: "trigger",
       };
     }
 
@@ -205,6 +211,24 @@ function emergencyReducer(state, action) {
         ...state,
         mlAvailable: action.payload.available ?? state.mlAvailable,
         mlEnabled: action.payload.enabled ?? state.mlEnabled,
+      };
+
+    case "SET_LIVE_MODE":
+      return {
+        ...state,
+        liveMode: action.payload,
+      };
+
+    case "SET_STORY_STEP":
+      return {
+        ...state,
+        storyStep: action.payload,
+      };
+
+    case "SET_SYSTEM_ALERT":
+      return {
+        ...state,
+        systemAlert: action.payload,
       };
 
     case "ADD_LOG":
@@ -334,6 +358,14 @@ export function EmergencyProvider({ children }) {
     (v) => dispatch({ type: "SET_ML_STATUS", payload: v }),
     [],
   );
+  const setLiveMode = useCallback(
+    (v) => dispatch({ type: "SET_LIVE_MODE", payload: v }),
+    [],
+  );
+  const setStoryStep = useCallback(
+    (v) => dispatch({ type: "SET_STORY_STEP", payload: v }),
+    [],
+  );
   const setTriggering = useCallback(
     (v) => dispatch({ type: "SET_TRIGGERING", payload: v }),
     [],
@@ -370,6 +402,8 @@ export function EmergencyProvider({ children }) {
         handleEmergencyComplete,
         setTriggering,
         handleMlStatus,
+        setLiveMode,
+        setStoryStep,
         setMlEnabled,
         setTrafficIntensity,
         setDisasterMode,

@@ -7,6 +7,7 @@ from datetime import datetime
 from typing import Dict, List, Tuple
 import json
 import os
+from simple_model import SimpleTrafficModel
 
 app = FastAPI(title="Emergency Traffic ML Service")
 
@@ -19,12 +20,13 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Load trained model
+# Load trained model or fallback to simple traffic predictor
 try:
     model = pickle.load(open("traffic_model.pkl", "rb"))
-except:
-    print("⚠️ Traffic model not found. Will train on first request.")
-    model = None
+    print("✓ Trained traffic model loaded")
+except Exception:
+    print("⚠️ Traffic model not found. Falling back to built-in predictor.")
+    model = SimpleTrafficModel()
 
 # Store user location
 USER_LOCATION = {"latitude": 40.7128, "longitude": -74.0060, "name": "New York"}
@@ -409,6 +411,66 @@ def quick_emergency_response(data: dict):
             "timestamp": datetime.now().isoformat()
         }
     
+    except Exception as e:
+        return {"error": str(e), "status": "failed"}
+
+@app.post("/score-hospital-candidates")
+def score_hospital_candidates(data: dict):
+    """
+    Score hospital candidates using distance, capacity, traffic, and ML impact.
+    """
+    try:
+        ambulances = data.get("ambulances", [])
+        hospitals = data.get("hospitals", [])
+        patient_lat = float(data["patient_lat"])
+        patient_lon = float(data["patient_lon"])
+        traffic_level = int(data.get("traffic_level", 3))
+        severity = str(data.get("severity", "critical"))
+
+        scored = []
+        for hospital in hospitals:
+            hospital_lat = float(hospital["coordinates"][1])
+            hospital_lon = float(hospital["coordinates"][0])
+            best_eta = None
+            if len(ambulances) > 0:
+                for amb in ambulances:
+                    amb_lat = float(amb["coordinates"][1])
+                    amb_lon = float(amb["coordinates"][0])
+                    total_dist = haversine_distance(amb_lat, amb_lon, patient_lat, patient_lon) + haversine_distance(patient_lat, patient_lon, hospital_lat, hospital_lon)
+                    score_input = np.array([[total_dist, traffic_level]])
+                    eta = float(model.predict(score_input)[0]) if model is not None else total_dist * 2 + traffic_level * 3
+                    if best_eta is None or eta < best_eta:
+                        best_eta = eta
+
+            available = float(hospital.get("available", 0))
+            capacity = float(hospital.get("capacity", 1))
+            capacity_pct = min(1.0, available / max(1.0, capacity))
+            load_penalty = 0 if capacity_pct >= 0.5 else (0.5 - capacity_pct) * 40
+            severity_penalty = 10 if severity == "critical" else 5 if severity == "high" else 0
+            score = (best_eta or 999) * 0.6 + load_penalty * 0.3 + severity_penalty * 0.1
+
+            scored.append({
+                "name": hospital.get("name", "Unknown"),
+                "id": hospital.get("id"),
+                "score": round(score, 2),
+                "eta": round(best_eta or 0, 1),
+                "available": int(available),
+                "capacity": int(capacity),
+                "reason": f"ETA {round(best_eta or 0,1)}m, {int(capacity_pct*100)}% free, traffic {traffic_level}/5",
+                "coordinates": hospital.get("coordinates"),
+            })
+
+        scored.sort(key=lambda h: h["score"])
+        selected = scored[0] if scored else None
+
+        return {
+            "status": "success",
+            "selected": selected,
+            "options": scored,
+            "timestamp": datetime.now().isoformat(),
+            "traffic_level": traffic_level,
+            "severity": severity,
+        }
     except Exception as e:
         return {"error": str(e), "status": "failed"}
 

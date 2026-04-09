@@ -1,5 +1,5 @@
 // Simulation data is generated around a center so the map can follow the user's location.
-const DEFAULT_CITY_CENTER = { lng: 78.4867, lat: 17.3850 }; // Hyderabad fallback
+const DEFAULT_CITY_CENTER = { lng: 78.4867, lat: 17.385 }; // Hyderabad fallback
 const DEFAULT_CITY_NAME = "Hyderabad";
 
 const HOSPITAL_TEMPLATES = [
@@ -91,6 +91,20 @@ const AMBULANCE_TEMPLATES = [
     type: "BLS",
     heading: 90,
   },
+  {
+    id: "AMB-006",
+    offset: [-0.032, -0.018],
+    crew: ["Dr. Lee", "EMT Park"],
+    type: "ALS",
+    heading: 180,
+  },
+  {
+    id: "AMB-007",
+    offset: [0.055, 0.028],
+    crew: ["EMT Taylor", "EMT Anderson"],
+    type: "BLS",
+    heading: 270,
+  },
 ];
 
 function createSimulationData(center = DEFAULT_CITY_CENTER) {
@@ -127,7 +141,10 @@ function normalizeHospitalFromOSM(element, index) {
   if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
 
   const capacity = 50 + ((index * 17) % 140);
-  const available = Math.max(3, Math.floor(capacity * (0.2 + ((index * 13) % 60) / 100)));
+  const available = Math.max(
+    3,
+    Math.floor(capacity * (0.2 + ((index * 13) % 60) / 100)),
+  );
   const status = computeHospitalStatus(available, capacity);
 
   const specialties = [

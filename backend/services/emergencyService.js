@@ -35,6 +35,7 @@ class EmergencyService {
     ambulances,
     hospitals,
     mapCenter = { lng: -74.006, lat: 40.7128 },
+    edgeService = null,
   ) {
     this.io = io;
     this.ambulances = ambulances;
@@ -43,14 +44,19 @@ class EmergencyService {
     this.cityName = "Hyderabad";
     this.hospitalSource = "template";
     this.activeEmergencies = new Map();
+    this.pendingEmergencies = [];
     this.ambulanceIntervals = new Map();
     this.trafficInterval = null;
     this.currentTraffic = "moderate";
+    this.etaCache = new Map();
     this.logs = [];
     this.mlAvailable = true;
+    this.mlEnabled = true;
+    this.edgeService = edgeService;
 
     this.startAmbulanceMovement();
     this.startTrafficVariation();
+    this.startHospitalLoadVariation();
   }
 
   async postToML(path, payload) {
@@ -67,7 +73,233 @@ class EmergencyService {
     return res.json();
   }
 
+  async chooseEmergencyPlan(patientCoords, severity) {
+    const availableAmbulances = this.ambulances.filter(
+      (amb) => amb.status === "available",
+    );
+    const baselineAmb = findNearestAmbulance(
+      patientCoords,
+      availableAmbulances,
+    ).ambulance;
+    const baselineHospital = findBestHospital(
+      patientCoords,
+      this.hospitals,
+      baselineAmb?.coordinates || patientCoords,
+    );
+
+    const task = {
+      ambulances: availableAmbulances,
+      hospitals: this.hospitals,
+      patientCoords,
+      trafficLevel: conditionToTrafficLevel(this.currentTraffic),
+      severity,
+    };
+
+    let edgeSelection = null;
+    if (this.edgeService && this.mlEnabled) {
+      try {
+        edgeSelection = await this.edgeService.scoreEmergency(task);
+        this.mlAvailable = true;
+      } catch (error) {
+        this.mlAvailable = false;
+        this.addLog(
+          "⚠️ Edge decision failed, falling back to heuristic",
+          "warning",
+        );
+      }
+    }
+
+    const selectedAmbulance = edgeSelection?.selectedAmbulance || baselineAmb;
+    const selectedHospital =
+      edgeSelection?.selectedHospital || baselineHospital;
+    const mlDecision = {
+      selectedHospital: selectedHospital?.name || "Unknown",
+      selectedAmbulance: selectedAmbulance?.id || "Unknown",
+      explanation:
+        edgeSelection?.explanation ||
+        "Selected using local dispatch heuristic.",
+      trafficLevel: this.currentTraffic,
+      baselineHospital: baselineHospital?.name || "Unknown",
+      baselineAmbulance: baselineAmb?.id || "Unknown",
+      improvedByML: Boolean(edgeSelection?.selectedHospital),
+      alternateHospitals: edgeSelection?.alternateHospitals || [],
+    };
+
+    return { selectedAmbulance, selectedHospital, mlDecision };
+  }
+
+  applyTrafficSpike() {
+    this.currentTraffic = "severe";
+    this.addLog(
+      "🚦 Traffic spike in effect — rerouting emergency vehicles",
+      "traffic",
+    );
+    this.activeEmergencies.forEach((emergency) => {
+      if (emergency.phase === "toHospital") {
+        this.rerouteEmergency(emergency);
+      }
+    });
+  }
+
+  startHospitalLoadVariation() {
+    setInterval(() => {
+      const candidate =
+        this.hospitals[Math.floor(Math.random() * this.hospitals.length)];
+      if (!candidate) return;
+
+      // Ensure at least one hospital always has capacity
+      const totalAvailable = this.hospitals.reduce(
+        (sum, h) => sum + h.available,
+        0,
+      );
+      if (totalAvailable <= 1 && candidate.available === 0) {
+        // Don't reduce capacity if this would make all hospitals full
+        return;
+      }
+
+      const change = Math.round((Math.random() - 0.4) * 2);
+      candidate.available = Math.max(
+        0,
+        Math.min(candidate.capacity, candidate.available + change),
+      );
+      if (candidate.available <= 5) {
+        candidate.status = "critical";
+      } else if (candidate.available <= Math.ceil(candidate.capacity * 0.2)) {
+        candidate.status = "limited";
+      } else {
+        candidate.status = "available";
+      }
+      this.io.emit("hospitalUpdate", candidate);
+
+      if (candidate.available === 0) {
+        this.addLog(
+          `🏥 ${candidate.name} is now full, rerouting nearby patients`,
+          "hospital",
+        );
+        this.activeEmergencies.forEach((emergency) => {
+          if (
+            emergency.hospitalId === candidate.id &&
+            emergency.phase !== "complete"
+          ) {
+            this.reassignHospital(emergency);
+          }
+        });
+      }
+    }, 17000);
+  }
+
+  async rerouteEmergency(emergency) {
+    const ambulance = this.ambulances.find(
+      (amb) => amb.id === emergency.ambulanceId,
+    );
+    if (!ambulance) return;
+
+    this.addLog(
+      `🔁 Rerouting ${ambulance.id} for emergency ${emergency.id} due to traffic or capacity changes`,
+      "reroute",
+    );
+
+    const routes = await generateFullRoute(
+      ambulance.coordinates,
+      emergency.patientCoords,
+      emergency.hospital.coordinates,
+    );
+
+    emergency.routes = routes;
+    emergency.totalDistance =
+      haversineDistance(
+        routes.toPatient[0],
+        routes.toPatient[routes.toPatient.length - 1],
+      ) +
+      haversineDistance(
+        routes.toHospital[0],
+        routes.toHospital[routes.toHospital.length - 1],
+      );
+    emergency.remainingDistance =
+      emergency.totalDistance * (1 - emergency.progress);
+    emergency.eta = calculateETA(
+      emergency.remainingDistance,
+      this.currentTraffic,
+    );
+
+    this.io.emit("routeUpdate", {
+      emergencyId: emergency.id,
+      ambulanceId: ambulance.id,
+      newETA: emergency.eta,
+      trafficCondition: this.currentTraffic,
+      routes: emergency.routes,
+      message: `Rerouted to ${emergency.hospital.name}`,
+    });
+  }
+
+  reassignHospital(emergency) {
+    const alternate = this.hospitals.find(
+      (h) =>
+        h.id !== emergency.hospitalId &&
+        h.status !== "critical" &&
+        h.available > 0,
+    );
+    if (!alternate) {
+      this.addLog(
+        `⚠️ No alternate hospital available for emergency ${emergency.id}. Waiting...`,
+        "hospital",
+      );
+      return;
+    }
+
+    emergency.hospital = alternate;
+    emergency.hospitalId = alternate.id;
+    alternate.available = Math.max(0, alternate.available - 1);
+    emergency.routes = {
+      ...emergency.routes,
+      toHospital: generateRoute(
+        emergency.patientCoords,
+        alternate.coordinates,
+        10,
+      ),
+      full: [
+        ...emergency.routes.toPatient,
+        ...generateRoute(
+          emergency.patientCoords,
+          alternate.coordinates,
+          10,
+        ).slice(1),
+      ],
+    };
+    emergency.totalDistance =
+      haversineDistance(
+        emergency.routes.toPatient[0],
+        emergency.routes.toPatient[emergency.routes.toPatient.length - 1],
+      ) +
+      haversineDistance(
+        emergency.routes.toHospital[0],
+        emergency.routes.toHospital[emergency.routes.toHospital.length - 1],
+      );
+    emergency.remainingDistance =
+      emergency.totalDistance * (1 - emergency.progress);
+    emergency.eta = calculateETA(
+      emergency.remainingDistance,
+      this.currentTraffic,
+    );
+
+    this.addLog(
+      `🏥 Rerouted emergency ${emergency.id} to ${alternate.name} due to full hospital`,
+      "hospital",
+    );
+    this.io.emit("routeUpdate", {
+      emergencyId: emergency.id,
+      ambulanceId: emergency.ambulanceId,
+      newETA: emergency.eta,
+      trafficCondition: this.currentTraffic,
+      message: `Hospital full; rerouted to ${alternate.name}`,
+    });
+  }
+
   async predictTrafficCondition(distanceKm = 5) {
+    if (!this.mlEnabled) {
+      return generateTrafficData();
+    }
+
     try {
       const data = await this.postToML("/get-traffic-prediction", {
         distance: Number(distanceKm.toFixed(2)),
@@ -91,6 +323,18 @@ class EmergencyService {
     hospitalCoords,
     trafficCondition,
   ) {
+    if (!this.mlEnabled) {
+      return null;
+    }
+
+    // Create cache key from coordinates and traffic
+    const cacheKey = `${ambulanceCoords.join(",")}-${patientCoords.join(",")}-${hospitalCoords.join(",")}-${trafficCondition}`;
+
+    // Check cache first
+    if (this.etaCache.has(cacheKey)) {
+      return this.etaCache.get(cacheKey);
+    }
+
     try {
       const trafficLevel = conditionToTrafficLevel(trafficCondition);
       const data = await this.postToML("/quick-emergency-response", {
@@ -109,7 +353,10 @@ class EmergencyService {
         Number.isFinite(Number(data.total_eta_minutes))
       ) {
         this.mlAvailable = true;
-        return Math.max(1, Math.round(Number(data.total_eta_minutes)));
+        const eta = Math.max(1, Math.round(Number(data.total_eta_minutes)));
+        // Cache the result
+        this.etaCache.set(cacheKey, eta);
+        return eta;
       }
     } catch (e) {
       this.mlAvailable = false;
@@ -158,6 +405,8 @@ class EmergencyService {
       this.currentTraffic = await this.predictTrafficCondition(6);
 
       if (prev !== this.currentTraffic) {
+        // Clear ETA cache when traffic changes
+        this.etaCache.clear();
         this.addLog(
           `Traffic condition changed: ${prev.toUpperCase()} → ${this.currentTraffic.toUpperCase()}`,
           "traffic",
@@ -233,28 +482,22 @@ class EmergencyService {
       this.mapCenter.lat + (Math.random() - 0.5) * 0.08,
     ];
 
-    // Find nearest available ambulance
-    const { ambulance, distance: ambDistance } = findNearestAmbulance(
-      patientCoords,
-      this.ambulances,
-    );
+    const plan = await this.chooseEmergencyPlan(patientCoords, severity);
+    const ambulance = plan.selectedAmbulance;
+    const hospital = plan.selectedHospital;
+    const mlDecision = plan.mlDecision;
 
     if (!ambulance) {
       this.addLog("⚠ No ambulances available!", "error");
       return null;
     }
 
-    // Find best hospital
-    const hospital = findBestHospital(
-      patientCoords,
-      this.hospitals,
-      ambulance.coordinates,
-    );
-
     if (!hospital) {
-      this.addLog("⚠ No hospitals available!", "error");
+      this.addLog("⚠ No hospital could be selected!", "error");
       return null;
     }
+
+    const ambDistance = haversineDistance(ambulance.coordinates, patientCoords);
 
     // Generate route
     let routes;
@@ -367,6 +610,13 @@ class EmergencyService {
       "eta",
     );
 
+    if (mlDecision.improvedByML) {
+      this.addLog(
+        `🤖 ML prioritized ${mlDecision.selectedHospital} over ${mlDecision.baselineHospital}`,
+        "ml",
+      );
+    }
+
     // Start ambulance movement simulation
     this.simulateAmbulanceMovement(emergency, ambulance);
 
@@ -380,6 +630,7 @@ class EmergencyService {
       eta,
       totalDistance,
       trafficCondition: this.currentTraffic,
+      aiDecision: mlDecision,
     };
   }
 
@@ -394,6 +645,12 @@ class EmergencyService {
         this.ambulanceIntervals.delete(emergency.id);
         ambulance.status = "available";
         emergency.phase = "complete";
+
+        // Restore hospital capacity
+        emergency.hospital.available = Math.min(
+          emergency.hospital.capacity,
+          emergency.hospital.available + 1,
+        );
 
         this.addLog(
           `✅ ${ambulance.id} delivered patient to ${emergency.hospital.name}`,
@@ -456,7 +713,7 @@ class EmergencyService {
         remainingDistance: emergency.remainingDistance.toFixed(2),
         trafficCondition: this.currentTraffic,
       });
-    }, 1500);
+    }, 1000);
 
     this.ambulanceIntervals.set(emergency.id, interval);
   }
@@ -471,6 +728,7 @@ class EmergencyService {
       activeEmergencies: Array.from(this.activeEmergencies.values()),
       trafficCondition: this.currentTraffic,
       mlAvailable: this.mlAvailable,
+      mlEnabled: this.mlEnabled,
       logs: this.logs.slice(0, 20),
     };
   }

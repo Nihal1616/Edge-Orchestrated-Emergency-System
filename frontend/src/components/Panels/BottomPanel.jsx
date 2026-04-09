@@ -3,20 +3,25 @@ import { useEmergency } from "../../context/EmergencyContext";
 
 const LOG_TYPES = {
   emergency: { color: "#ff2020", icon: "🚨" },
-  dispatch:  { color: "#0088ff", icon: "🚑" },
-  hospital:  { color: "#00cc6a", icon: "🏥" },
-  traffic:   { color: "#ffaa00", icon: "🚦" },
-  reroute:   { color: "#ff6600", icon: "↺" },
-  eta:       { color: "#00aaff", icon: "⏱" },
-  complete:  { color: "#00ff88", icon: "✅" },
-  error:     { color: "#ff4444", icon: "⚠" },
-  info:      { color: "#5a7fa0", icon: "ℹ" },
+  dispatch: { color: "#0088ff", icon: "🚑" },
+  hospital: { color: "#00cc6a", icon: "🏥" },
+  traffic: { color: "#ffaa00", icon: "🚦" },
+  reroute: { color: "#ff6600", icon: "↺" },
+  eta: { color: "#00aaff", icon: "⏱" },
+  complete: { color: "#00ff88", icon: "✅" },
+  error: { color: "#ff4444", icon: "⚠" },
+  info: { color: "#5a7fa0", icon: "ℹ" },
 };
 
 function formatTime(iso) {
   try {
     const d = new Date(iso);
-    return d.toLocaleTimeString("en-US", { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" });
+    return d.toLocaleTimeString("en-US", {
+      hour12: false,
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+    });
   } catch {
     return "--:--:--";
   }
@@ -35,7 +40,9 @@ export default function BottomPanel() {
             Activity
           </span>
         </div>
-        <span className="text-xs font-mono text-gray-600">{logs.length} events</span>
+        <span className="text-xs font-mono text-gray-600">
+          {logs.length} events
+        </span>
       </div>
 
       <div className="flex-1 overflow-y-auto space-y-0.5 pr-1">
@@ -45,20 +52,25 @@ export default function BottomPanel() {
               Awaiting system events...
             </div>
           ) : (
-            logs.map((log) => {
+            logs.map((log, index) => {
               const config = LOG_TYPES[log.type] || LOG_TYPES.info;
               return (
                 <motion.div
-                  key={log.id}
+                  key={`${log.id}-${index}`}
                   initial={{ opacity: 0, x: -20 }}
                   animate={{ opacity: 1, x: 0 }}
                   exit={{ opacity: 0 }}
                   transition={{ duration: 0.3 }}
                   className="flex items-start gap-2 py-0.5 px-2 rounded hover:bg-blue-950/20 transition-colors"
                 >
-                  <span className="text-xs mt-0.5 flex-shrink-0 opacity-80">{config.icon}</span>
+                  <span className="text-xs mt-0.5 flex-shrink-0 opacity-80">
+                    {config.icon}
+                  </span>
                   <div className="flex-1 min-w-0">
-                    <span className="text-xs font-body text-gray-300" style={{ color: config.color }}>
+                    <span
+                      className="text-xs font-body text-gray-300"
+                      style={{ color: config.color }}
+                    >
                       {log.message}
                     </span>
                   </div>
